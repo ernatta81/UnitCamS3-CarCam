@@ -37,7 +37,7 @@ bool hal::sdCardInit()
         gpio_pullup_en((gpio_num_t)gpio);
     }
 
-    // Recording needs the bandwidth, slower clock if the card does not like it
+    // Clips need the bandwidth, slower clock if the card does not like it
     bool ok = SD.begin(HAL_PIN_SD_CS, _sd_spi, APP_SD_FREQ_HZ);
     if (!ok)
     {
@@ -51,11 +51,8 @@ bool hal::sdCardInit()
         return false;
     }
 
-    for (auto dir : {APP_DIR_DRIVE, APP_DIR_PARK})
-    {
-        if (!SD.exists(dir) && !SD.mkdir(dir))
-            log_e("create %s failed", dir);
-    }
+    if (!SD.exists(APP_DIR_PARK) && !SD.mkdir(APP_DIR_PARK))
+        log_e("create %s failed", APP_DIR_PARK);
 
     _is_sd_card_valid = true;
     log_i("sd card ok, %llu MB, %llu MB free", sdTotalBytes() >> 20, sdFreeBytes() >> 20);

@@ -106,7 +106,7 @@ bool hal::isTriggerActive()
 
 float hal::getTemperature()
 {
-    // Read from the recorder and the web server tasks, the sensor driver is not reentrant
+    // Read from the main and the web server tasks, the sensor driver is not reentrant
     xSemaphoreTake(_temp_mutex, portMAX_DELAY);
     if (_temp_read_ms == 0 || millis() - _temp_read_ms > 1000)
     {

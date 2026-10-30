@@ -1,8 +1,8 @@
 /**
  * @file parking.h
  * @brief Parking watch: deep sleep, wake on a timer or a sensor, look for motion, record a clip
- * @version 0.1
- * @date 2026-10-29
+ * @version 0.2
+ * @date 2026-10-30
  *
  */
 #pragma once
@@ -22,20 +22,13 @@ namespace Parking
         uint32_t skipped_events;
     };
 
-    // Dashcam mode, or ignition on in auto mode
-    bool should_drive();
-
-    // One deep sleep wake while parked, no wifi: motion check, clip or photo, back to sleep. Does not return
+    // One deep sleep wake, no wifi: motion check, clip or photo, back to sleep. Does not return
     void run_wake_cycle(esp_sleep_wakeup_cause_t wake);
 
-    // Deep sleep with the parking wake ups armed (timer, trigger sensor, ignition). Does not return
-    void sleep();
-
-    // Overheated: deep sleep for a while, then try again. Does not return
-    void sleep_thermal();
-
-    // Driving start after a thermal sleep: not cooled down yet?
-    bool is_still_too_hot();
+    // Deep sleep with the wake ups armed (timer, trigger sensor, ignition). Does not return.
+    // Ignition on: paused until it goes off. arm_delay_sec > 0: first check only after that,
+    // with a fresh reference image
+    void sleep(uint32_t arm_delay_sec = 0);
 
     // Since power on
     Stats_t get_stats();

@@ -1,13 +1,10 @@
 {
-    "mode": "dashcam",
     "frameSize": "VGA",
     "jpegQuality": 12,
     "fps": 10,
-    "segmentSec": 60,
     "minFreeMb": 1024,
     "vflip": true,
     "hmirror": true,
-    "led": true,
     "accPin": -1,
     "accActiveHigh": false,
     "triggerPin": -1,
@@ -21,7 +18,5 @@
     "apSsid": "",
     "apPass": "unitcams3",
     "apMinutes": 5,
-    "apAlwaysOn": false,
-    "tempStopC": 80,
-    "tempResumeC": 70
+    "tempStopC": 80
 }

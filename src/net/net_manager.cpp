@@ -1,8 +1,8 @@
 /**
  * @file net_manager.cpp
  * @brief
- * @version 0.1
- * @date 2026-10-29
+ * @version 0.2
+ * @date 2026-10-30
  *
  */
 #include "net_manager.h"
@@ -11,17 +11,16 @@
 
 
 static bool _is_ap_on = false;
-static bool _keep_on = false;
 static uint32_t _last_client_ms = 0;
 static String _ssid;
 
 
-void NetManager::start_ap(bool keep_on)
+void NetManager::start_ap()
 {
     auto hal = HAL::hal::GetHal();
     auto& config = hal->getConfig();
 
-    _ssid = config.ap_ssid != "" ? config.ap_ssid : "CarCam-" + hal->getDeviceId().substring(6);
+    _ssid = config.ap_ssid != "" ? config.ap_ssid : "ParkCam-" + hal->getDeviceId().substring(6);
     // WPA2 needs at least 8 characters, open network otherwise
     const char* password = config.ap_password.length() >= 8 ? config.ap_password.c_str() : nullptr;
 
@@ -31,7 +30,6 @@ void NetManager::start_ap(bool keep_on)
     WiFi.setTxPower(WIFI_POWER_11dBm);
 
     _is_ap_on = true;
-    _keep_on = keep_on;
     _last_client_ms = millis();
     printf("ap: %s (%s), open http://%s/\n", _ssid.c_str(), password ? "wpa2" : "open", WiFi.softAPIP().toString().c_str());
 }
@@ -49,7 +47,7 @@ void NetManager::update()
     }
 
     uint32_t timeout_ms = HAL::hal::GetHal()->getConfig().ap_minutes * 60000UL;
-    if (!_keep_on && millis() - _last_client_ms > timeout_ms)
+    if (millis() - _last_client_ms > timeout_ms)
     {
         log_i("no phone for %lu min, wifi off", timeout_ms / 60000);
         stop();

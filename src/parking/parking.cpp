@@ -1,8 +1,8 @@
 /**
  * @file parking.cpp
  * @brief
- * @version 0.1
- * @date 2026-10-29
+ * @version 0.2
+ * @date 2026-10-30
  *
  */
 #include "parking.h"
@@ -24,14 +24,13 @@ struct State_t
     time_t events_window_start;
     int events_in_window;
     time_t last_photo;
-    bool thermal_pause;
     Parking::Stats_t stats;
 };
 
 // Kept through deep sleep, cleared on power loss
 RTC_DATA_ATTR static State_t _state = {};
 
-// Only the parking wakes count in the awake time stats, not driving or the setup window
+// Only the watch wakes count in the awake time stats, not the access point window
 static bool _is_wake_cycle = false;
 
 
@@ -177,30 +176,27 @@ static void _set_sleep_pulls(int pin, bool active_high)
 }
 
 
-static void _arm_ignition_wake()
+// Wake when the ignition changes to the other state
+static void _arm_ignition_wake(bool is_on)
 {
-    auto hal = HAL::hal::GetHal();
-    auto& config = hal->getConfig();
-    if (config.mode != "auto" || config.acc_pin < 0)
+    auto& config = HAL::hal::GetHal()->getConfig();
+    if (config.acc_pin < 0)
         return;
 
-    // Ignition already on would wake us straight away
-    if (hal->isAccOn())
-        return;
-
+    bool wake_high = is_on != config.acc_active_high;
     _set_sleep_pulls(config.acc_pin, config.acc_active_high);
-    esp_sleep_enable_ext1_wakeup(1ULL << config.acc_pin, config.acc_active_high ? ESP_EXT1_WAKEUP_ANY_HIGH : ESP_EXT1_WAKEUP_ANY_LOW);
+    esp_sleep_enable_ext1_wakeup(1ULL << config.acc_pin, wake_high ? ESP_EXT1_WAKEUP_ANY_HIGH : ESP_EXT1_WAKEUP_ANY_LOW);
 }
 
 
-static void _deep_sleep(uint64_t sleep_sec, bool count_awake_time)
+static void _deep_sleep(uint64_t sleep_sec)
 {
     NetManager::stop();
     HAL::hal::GetHal()->prepareDeepSleep();
 
     if (sleep_sec > 0)
         esp_sleep_enable_timer_wakeup(sleep_sec * 1000000ULL);
-    if (count_awake_time)
+    if (_is_wake_cycle)
         _state.stats.awake_ms += millis();
 
     printf("deep sleep %llu s, was awake %lu ms\n", sleep_sec, millis());
@@ -209,22 +205,19 @@ static void _deep_sleep(uint64_t sleep_sec, bool count_awake_time)
 }
 
 
-bool Parking::should_drive()
-{
-    auto hal = HAL::hal::GetHal();
-    auto& mode = hal->getConfig().mode;
-    if (mode == "parking")
-        return false;
-    if (mode == "auto")
-        return hal->isAccOn();
-    return true;
-}
-
-
 void Parking::run_wake_cycle(esp_sleep_wakeup_cause_t wake)
 {
     auto hal = HAL::hal::GetHal();
     auto& config = hal->getConfig();
+
+    // Driving: nothing to watch, sleep until the ignition goes off
+    if (hal->isAccOn())
+        sleep();
+    // Ignition just went off: let the driver walk away first
+    if (wake == ESP_SLEEP_WAKEUP_EXT1)
+        sleep(APP_PARK_ARM_DELAY_SEC);
+
+    _is_wake_cycle = true;
     _state.stats.wakes++;
 
     time_t now = time(nullptr);
@@ -246,16 +239,31 @@ void Parking::run_wake_cycle(esp_sleep_wakeup_cause_t wake)
     else if (triggered || check_motion || photo_due)
         _watch(triggered, check_motion, photo_due);
 
-    _is_wake_cycle = true;
     sleep();
 }
 
 
-void Parking::sleep()
+void Parking::sleep(uint32_t arm_delay_sec)
 {
     auto hal = HAL::hal::GetHal();
     auto& config = hal->getConfig();
     time_t now = time(nullptr);
+
+    if (hal->isAccOn())
+    {
+        // Paused while driving, the scene will be a different one afterwards
+        log_i("ignition on, watch paused");
+        _state.has_reference = false;
+        _arm_ignition_wake(true);
+        _deep_sleep(0);
+    }
+    _arm_ignition_wake(false);
+
+    if (arm_delay_sec > 0)
+    {
+        _state.has_reference = false;
+        _deep_sleep(arm_delay_sec);
+    }
 
     uint64_t sleep_sec = 0;
     if (config.park_check_sec > 0)
@@ -298,38 +306,10 @@ void Parking::sleep()
         }
     }
 
-    _arm_ignition_wake();
-
-    if (sleep_sec == 0 && config.trigger_pin < 0 && config.mode != "auto")
+    if (sleep_sec == 0 && config.trigger_pin < 0)
         log_w("no wake up source: motion check, time lapse and trigger are all off");
 
-    _deep_sleep(sleep_sec, _is_wake_cycle);
-}
-
-
-void Parking::sleep_thermal()
-{
-    _state.thermal_pause = true;
-    _arm_ignition_wake();
-    _deep_sleep(APP_THERMAL_SLEEP_SEC, false);
-}
-
-
-bool Parking::is_still_too_hot()
-{
-    if (!_state.thermal_pause)
-        return false;
-
-    auto hal = HAL::hal::GetHal();
-    float temp = hal->getTemperature();
-    if (temp > hal->getConfig().temp_resume_c)
-    {
-        log_w("still too hot: %.1f C", temp);
-        return true;
-    }
-
-    _state.thermal_pause = false;
-    return false;
+    _deep_sleep(sleep_sec);
 }
 
 

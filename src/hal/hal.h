@@ -1,6 +1,6 @@
 /**
  * @file hal.h
- * @brief UnitCamS3 board support for the car camera: camera, sd card, status led,
+ * @brief UnitCamS3 board support for the parking monitor: camera, sd card, status led,
  *        grove port inputs, die temperature, clock, persistent config.
  * @version 0.1
  * @date 2026-10-29
@@ -31,26 +31,22 @@ namespace HAL
     public:
         struct Config_t
         {
-            // "dashcam": record while powered, "parking": low power watch, "auto": ignition input picks
-            String mode = "dashcam";
-
-            // Camera and recording
+            // Camera and clips
             String frame_size = "VGA";
             int jpeg_quality = 12;
             int fps = 10;
-            int segment_sec = 60;
             int min_free_mb = 1024;
             bool vflip = true;
             bool hmirror = true;
-            bool led = true;
 
-            // Grove port inputs (19 or 20), -1 = not used
+            // Grove port inputs (19 or 20), -1 = not used.
+            // Ignition on pauses the watch, the trigger sensor wakes it up
             int acc_pin = -1;
             bool acc_active_high = false;
             int trigger_pin = -1;
             bool trigger_active_high = true;
 
-            // Parking
+            // Watch
             int park_check_sec = 10;
             int motion_threshold = 25;
             int motion_area_pct = 3;
@@ -58,15 +54,13 @@ namespace HAL
             int max_events_per_hour = 10;
             int timelapse_min = 0;
 
-            // Access point for the phone, empty ssid = "CarCam-xxxxxx", password shorter than 8 = open
+            // Access point for the phone, empty ssid = "ParkCam-xxxxxx", password shorter than 8 = open
             String ap_ssid;
             String ap_password = APP_DEFAULT_AP_PASSWORD;
             int ap_minutes = 5;
-            bool ap_always_on = false;
 
-            // Die temperature limits
+            // Die temperature above which the wakes skip the camera
             int temp_stop_c = 80;
-            int temp_resume_c = 70;
         };
 
     private:
@@ -91,7 +85,6 @@ namespace HAL
 
         // Values accepted in the config
         static bool isValidFrameSize(const String& name);
-        static bool isValidMode(const String& name);
         static bool isValidInputPin(int pin);
 
         // Camera, frame size and quality from the config
@@ -111,7 +104,7 @@ namespace HAL
         bool isAccOn();
         bool isTriggerActive();
 
-        // Die temperature, well above the cabin air while recording with wifi on
+        // Die temperature, close to the cabin air right after a deep sleep wake
         float getTemperature();
 
         // Clock from the phone, kept through deep sleep but lost on power loss

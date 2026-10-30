@@ -1,8 +1,8 @@
 /**
  * @file storage.cpp
  * @brief
- * @version 0.1
- * @date 2026-10-29
+ * @version 0.2
+ * @date 2026-10-30
  *
  */
 #include "storage.h"
@@ -74,18 +74,12 @@ void Storage::begin()
     if (_rtc_next_number != 0)
         return;
 
-    uint32_t newest = 0;
-    for (auto dir : {APP_DIR_DRIVE, APP_DIR_PARK})
-    {
-        auto scan = _scan_dir(dir);
-        newest = max(newest, scan.newest_number);
+    // Only the last clip can be the one a power cut left open
+    auto scan = _scan_dir(APP_DIR_PARK);
+    if (scan.newest.endsWith(".avi"))
+        AviWriter::repairIfNeeded(scan.newest);
 
-        // Only the last clip of each folder can be the one a power cut left open
-        if (scan.newest.endsWith(".avi"))
-            AviWriter::repairIfNeeded(scan.newest);
-    }
-
-    _rtc_next_number = newest + 1;
+    _rtc_next_number = scan.newest_number + 1;
     log_i("next file number: %u", _rtc_next_number);
 }
 
@@ -116,9 +110,7 @@ bool Storage::ensure_free_space()
 
     for (int i = 0; i < 100 && hal->sdFreeBytes() < min_free; i++)
     {
-        auto scan = _scan_dir(APP_DIR_DRIVE);
-        if (scan.oldest == "")
-            scan = _scan_dir(APP_DIR_PARK);
+        auto scan = _scan_dir(APP_DIR_PARK);
         if (scan.oldest == "")
             break;
 
@@ -171,10 +163,8 @@ bool Storage::is_media_path(const String& path)
 {
     if (path.indexOf("..") >= 0)
         return false;
-    if (!path.startsWith(APP_DIR_DRIVE "/") && !path.startsWith(APP_DIR_PARK "/"))
-        return false;
     // No sub folders
-    if (path.indexOf('/', path.indexOf('/', 1) + 1) >= 0)
+    if (!path.startsWith(APP_DIR_PARK "/") || path.indexOf('/', strlen(APP_DIR_PARK) + 1) >= 0)
         return false;
     return _get_number(path) != 0;
 }

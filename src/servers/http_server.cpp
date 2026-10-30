@@ -1,8 +1,8 @@
 /**
  * @file http_server.cpp
  * @brief
- * @version 0.1
- * @date 2026-10-29
+ * @version 0.2
+ * @date 2026-10-30
  *
  */
 #include "http_server.h"
@@ -16,7 +16,6 @@
 #include "../hal/hal.h"
 #include "../net/net_manager.h"
 #include "../parking/parking.h"
-#include "../recorder/recorder.h"
 #include "../storage/storage.h"
 
 
@@ -65,7 +64,7 @@ class AsyncBufferResponse: public AsyncAbstractResponse {
 
 static const char _index_html[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CarCam</title>
+<title>ParkCam</title>
 <style>
 body{font-family:system-ui,sans-serif;margin:0;background:#f4f4f5;color:#18181b}
 main{max-width:720px;margin:0 auto;padding:16px}
@@ -84,7 +83,7 @@ button.sec{background:#e4e4e7;color:#18181b}
 .files button{margin:0;padding:4px 10px;background:#dc2626;font-size:13px}
 small{display:block;margin-top:8px;color:#71717a}
 </style></head><body><main>
-<h1>UnitCamS3 CarCam</h1>
+<h1>UnitCamS3 Parking Monitor</h1>
 <div class="card warn" id="warn" hidden></div>
 <div class="card"><h2>Stato</h2><div id="status">...</div></div>
 <div class="card">
@@ -93,20 +92,13 @@ small{display:block;margin-top:8px;color:#71717a}
 <small>Serve per puntare la camera. Tenerla aperta consuma e scalda il modulo.</small>
 </div>
 <div class="card">
-<h2>Video e foto</h2>
-<button type="button" class="sec" onclick="loadFiles('/rec')">Guida</button><button type="button" class="sec" onclick="loadFiles('/park')">Parcheggio</button>
+<h2>Eventi e foto</h2>
 <div class="files" id="files"></div>
 <button type="button" class="sec" id="moreBtn" onclick="showMore()" hidden>Altri</button>
 <small>I file .avi si aprono con VLC. Il download è lento (scheda SD in SPI): meglio togliere la scheda per scaricare molti video.</small>
 </div>
 <form class="card" method="post" action="/api/v1/config">
 <h2>Impostazioni</h2>
-<label>Modalità</label>
-<select name="mode" id="mode">
-<option value="dashcam">Dashcam: registra sempre quando è alimentata</option>
-<option value="parking">Parcheggio: sorveglianza a basso consumo</option>
-<option value="auto">Automatica: quadro acceso = dashcam, spento = parcheggio (serve ACC)</option>
-</select>
 <h3>Video</h3>
 <label>Risoluzione</label>
 <select name="frameSize" id="frameSize">
@@ -118,20 +110,18 @@ small{display:block;margin-top:8px;color:#71717a}
 </select>
 <label>Qualità JPEG (6 = migliore, 63 = file più piccoli)</label><input name="jpegQuality" id="jpegQuality" type="number" min="6" max="63">
 <label>Fotogrammi al secondo</label><input name="fps" id="fps" type="number" min="1" max="25">
-<label>Durata di ogni file in guida (s)</label><input name="segmentSec" id="segmentSec" type="number" min="10" max="600">
 <label>Spazio libero minimo, sotto cancella i video più vecchi (MB)</label><input name="minFreeMb" id="minFreeMb" type="number" min="100" max="65536">
 <label><input type="checkbox" name="vflip" id="vflip">Capovolgi in verticale</label>
 <label><input type="checkbox" name="hmirror" id="hmirror">Specchia in orizzontale</label>
-<label><input type="checkbox" name="led" id="led">LED acceso mentre registra in guida</label>
 <h3>Ingressi sulla porta Grove</h3>
-<label>Quadro acceso (ACC)</label>
+<label>Quadro acceso (ACC): sorveglianza in pausa mentre guidi</label>
 <select name="accPin" id="accPin"><option value="-1">Non collegato</option><option value="19">G19</option><option value="20">G20</option></select>
 <label><input type="checkbox" name="accActiveHigh" id="accActiveHigh">ACC attivo alto (spento con il fotoaccoppiatore verso GND)</label>
 <label>Sensore di risveglio (vibrazione / PIR)</label>
 <select name="triggerPin" id="triggerPin"><option value="-1">Non collegato</option><option value="19">G19</option><option value="20">G20</option></select>
 <label><input type="checkbox" name="triggerActiveHigh" id="triggerActiveHigh">Sensore attivo alto</label>
 <small>Usare G19/G20 come ingressi disattiva la USB della porta Grove: per caricare il firmware scollega i sensori.</small>
-<h3>Parcheggio</h3>
+<h3>Sorveglianza</h3>
 <label>Controllo movimento con la camera ogni (s, 0 = spento)</label><input name="parkCheckSec" id="parkCheckSec" type="number" min="0" max="3600">
 <label>Differenza di luminosità per cella (5-100)</label><input name="motionThreshold" id="motionThreshold" type="number" min="5" max="100">
 <label>Area minima cambiata (%)</label><input name="motionAreaPct" id="motionAreaPct" type="number" min="1" max="100">
@@ -139,20 +129,18 @@ small{display:block;margin-top:8px;color:#71717a}
 <label>Massimo eventi all'ora</label><input name="maxEventsPerHour" id="maxEventsPerHour" type="number" min="1" max="60">
 <label>Foto time-lapse ogni (min, 0 = spento)</label><input name="timelapseMin" id="timelapseMin" type="number" min="0" max="1440">
 <h3>Wi-Fi</h3>
-<label>Nome rete (vuoto = CarCam-xxxxxx)</label><input name="apSsid" id="apSsid" maxlength="32">
+<label>Nome rete (vuoto = ParkCam-xxxxxx)</label><input name="apSsid" id="apSsid" maxlength="32">
 <label>Password (8-63 caratteri, vuoto = mantieni quella attuale)</label><input name="apPass" type="password" maxlength="63" autocomplete="new-password">
 <label><input type="checkbox" name="apOpen" id="apOpen">Rete aperta senza password (sconsigliato)</label>
 <label>Spegni il Wi-Fi dopo (min senza telefono collegato)</label><input name="apMinutes" id="apMinutes" type="number" min="1" max="120">
-<label><input type="checkbox" name="apAlwaysOn" id="apAlwaysOn">Wi-Fi sempre acceso in guida (+0,3-0,5 W)</label>
 <h3>Temperatura (sensore interno del chip)</h3>
-<label>Ferma tutto sopra (°C)</label><input name="tempStopC" id="tempStopC" type="number" min="50" max="100">
-<label>Riprendi sotto (°C)</label><input name="tempResumeC" id="tempResumeC" type="number" min="30" max="95">
+<label>Salta i controlli sopra (°C)</label><input name="tempStopC" id="tempStopC" type="number" min="50" max="100">
 <button>Salva e riavvia</button>
 </form>
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let live=false,files=[],shown=0,dir='/rec',filled=false;
+let live=false,files=[],shown=0,filled=false;
 function esc(t){return String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function fill(c){
   for(const k in c){const e=$(k);if(!e)continue;if(e.type==='checkbox')e.checked=c[k];else e.value=c[k];}
@@ -160,20 +148,18 @@ function fill(c){
 function refresh(){
   fetch('/api/v1/status').then(r=>r.json()).then(d=>{
     const s=d.stats,w=[];
-    if(!d.sdOk)w.push('Scheda SD assente o in errore: non sto registrando.');
+    if(!d.sdOk)w.push('Scheda SD assente o in errore: gli eventi non verranno salvati.');
     if(d.apOpen)w.push('Wi-Fi aperto: chiunque vicino all\'auto può vedere e cancellare i video.');
     else if(d.apDefaultPass)w.push('Password Wi-Fi predefinita: cambiala nelle impostazioni.');
     if(d.temp>d.config.tempStopC-10)w.push('Temperatura alta: '+d.temp.toFixed(0)+' °C.');
     $('warn').innerHTML=w.map(esc).join('<br>');$('warn').hidden=!w.length;
     const rows=[
-      ['Modalità',d.mode+(d.driving?' (guida)':' (in attesa, poi parcheggio)')],
-      ['Registrazione',d.recording?(d.file||'...')+' a '+d.fps.toFixed(1)+' fps':'no'],
       ['Scheda SD',d.sdOk?d.sdFreeMb+' MB liberi su '+d.sdTotalMb+' MB':'non disponibile'],
       ['Temperatura chip',d.temp.toFixed(1)+' °C'],
       ['Ora',d.timeValid?d.time:'non impostata'],
-      ['Quadro (ACC)',d.acc===null?'non collegato':(d.acc?'acceso':'spento')],
-      ['Parcheggio',s.wakes+' risvegli, '+(s.wakes?Math.round(s.awakeMs/s.wakes):0)+' ms medi da sveglia, '+s.events+' eventi, '+s.photos+' foto, '+s.skipped+' eventi oltre il limite'],
-      ['Wi-Fi',d.apSsid+', '+d.clients+' collegati'],
+      ['Quadro (ACC)',d.acc===null?'non collegato':(d.acc?'acceso (sorveglianza in pausa)':'spento')],
+      ['Da accensione',s.wakes+' risvegli, '+(s.wakes?Math.round(s.awakeMs/s.wakes):0)+' ms medi da sveglia, '+s.events+' eventi, '+s.photos+' foto, '+s.skipped+' eventi oltre il limite'],
+      ['Wi-Fi',d.apSsid+', '+d.clients+' collegati, si spegne dopo '+d.config.apMinutes+' min senza telefono, poi parte la sorveglianza'],
       ['Acceso da',Math.floor(d.uptime/60)+' min']];
     $('status').innerHTML=rows.map(r=>'<div class="row">'+r[0]+': <b>'+esc(r[1])+'</b></div>').join('');
     if(!filled){filled=true;fill(d.config);}
@@ -186,15 +172,15 @@ function toggleLive(){
 function nextFrame(){if(live)$('live').src='/api/v1/capture?t='+Date.now();}
 $('live').onload=()=>setTimeout(nextFrame,200);
 $('live').onerror=()=>setTimeout(nextFrame,1000);
-function loadFiles(d){
-  dir=d;$('files').textContent='Caricamento...';$('moreBtn').hidden=true;
-  fetch('/api/v1/files?dir='+d).then(r=>r.json()).then(l=>{
+function loadFiles(){
+  $('files').textContent='Caricamento...';$('moreBtn').hidden=true;
+  fetch('/api/v1/files').then(r=>r.json()).then(l=>{
     files=l.sort((a,b)=>parseInt(b.slice(1))-parseInt(a.slice(1)));shown=0;
     $('files').textContent=files.length?'':'Nessun file.';showMore();
   }).catch(()=>{$('files').textContent='Errore.';});
 }
 function showMore(){
-  const html=files.slice(shown,shown+50).map(n=>{const p=dir+'/'+n;
+  const html=files.slice(shown,shown+50).map(n=>{const p='/park/'+n;
     return '<div><a href="/api/v1/download?path='+encodeURIComponent(p)+'">'+esc(n)+'</a><button type="button" data-p="'+esc(p)+'" onclick="del(this)">Elimina</button></div>';}).join('');
   $('files').insertAdjacentHTML('beforeend',html);shown+=50;$('moreBtn').hidden=shown>=files.length;
 }
@@ -205,7 +191,7 @@ function del(b){
 }
 // No battery backed clock on the camera: it takes the phone's time
 fetch('/api/v1/time',{method:'POST',body:new URLSearchParams({epoch:Math.floor(Date.now()/1000),tz:new Date().getTimezoneOffset()})})
-  .finally(()=>{refresh();loadFiles('/rec');});
+  .finally(()=>{refresh();loadFiles();});
 setInterval(refresh,5000);
 </script>
 </body></html>
@@ -231,12 +217,7 @@ static void _handle_status(AsyncWebServerRequest* request)
     auto stats = Parking::get_stats();
 
     DynamicJsonDocument doc(3072);
-    doc["mode"] = config.mode;
-    doc["driving"] = Parking::should_drive();
-    doc["recording"] = Recorder::is_recording();
-    doc["file"] = Recorder::get_current_path();
-    doc["fps"] = Recorder::get_fps();
-    doc["sdOk"] = hal->isSdCardValid() && !Recorder::has_sd_error();
+    doc["sdOk"] = hal->isSdCardValid();
     doc["sdTotalMb"] = (uint32_t)(hal->sdTotalBytes() >> 20);
     doc["sdFreeMb"] = (uint32_t)(hal->sdFreeBytes() >> 20);
     doc["temp"] = hal->getTemperature();
@@ -261,15 +242,12 @@ static void _handle_status(AsyncWebServerRequest* request)
     s["skipped"] = stats.skipped_events;
 
     JsonObject c = doc.createNestedObject("config");
-    c["mode"] = config.mode;
     c["frameSize"] = config.frame_size;
     c["jpegQuality"] = config.jpeg_quality;
     c["fps"] = config.fps;
-    c["segmentSec"] = config.segment_sec;
     c["minFreeMb"] = config.min_free_mb;
     c["vflip"] = config.vflip;
     c["hmirror"] = config.hmirror;
-    c["led"] = config.led;
     c["accPin"] = config.acc_pin;
     c["accActiveHigh"] = config.acc_active_high;
     c["triggerPin"] = config.trigger_pin;
@@ -283,9 +261,7 @@ static void _handle_status(AsyncWebServerRequest* request)
     c["apSsid"] = config.ap_ssid;
     c["apOpen"] = config.ap_password.length() < 8;
     c["apMinutes"] = config.ap_minutes;
-    c["apAlwaysOn"] = config.ap_always_on;
     c["tempStopC"] = config.temp_stop_c;
-    c["tempResumeC"] = config.temp_resume_c;
 
     String json;
     serializeJson(doc, json);
@@ -296,10 +272,9 @@ static void _handle_status(AsyncWebServerRequest* request)
 static void _handle_capture(AsyncWebServerRequest* request)
 {
     size_t len = 0;
-    uint8_t* buf = Recorder::copy_preview(len);
+    uint8_t* buf = nullptr;
 
-    // Not recording (setup window before parking): straight from the camera
-    if (buf == nullptr && !Recorder::is_recording() && HAL::hal::GetHal()->isCamRunning())
+    if (HAL::hal::GetHal()->isCamRunning())
     {
         camera_fb_t* fb = esp_camera_fb_get();
         if (fb != nullptr)
@@ -328,18 +303,12 @@ static void _handle_capture(AsyncWebServerRequest* request)
 
 static void _handle_files(AsyncWebServerRequest* request)
 {
-    String dir = request->hasParam("dir") ? request->getParam("dir")->value() : "";
-    if (dir != APP_DIR_DRIVE && dir != APP_DIR_PARK)
-    {
-        _send_error(request, 400, "bad dir");
-        return;
-    }
     if (!HAL::hal::GetHal()->isSdCardValid())
     {
         request->send(200, "application/json", "[]");
         return;
     }
-    request->send(200, "application/json", Storage::list_json(dir.c_str()));
+    request->send(200, "application/json", Storage::list_json(APP_DIR_PARK));
 }
 
 
@@ -351,12 +320,6 @@ static void _handle_download(AsyncWebServerRequest* request)
         _send_error(request, 404, "File non trovato");
         return;
     }
-    if (path == Recorder::get_current_path())
-    {
-        _send_error(request, 409, "File in registrazione, riprova tra poco");
-        return;
-    }
-
     request->send(SD, path, path.endsWith(".jpg") ? "image/jpeg" : "video/x-msvideo", true);
 }
 
@@ -367,11 +330,6 @@ static void _handle_delete(AsyncWebServerRequest* request)
     if (!Storage::is_media_path(path))
     {
         _send_error(request, 400, "Percorso non valido");
-        return;
-    }
-    if (path == Recorder::get_current_path())
-    {
-        _send_error(request, 409, "File in registrazione");
         return;
     }
     if (!HAL::hal::GetHal()->isSdCardValid() || !SD.remove(path))
@@ -437,34 +395,28 @@ static void _handle_set_config(AsyncWebServerRequest* request)
     auto& config = hal->getConfig();
 
     // Check first, nothing changes on an error
-    String mode = _get_string(request, "mode", config.mode);
     int acc_pin = _get_int(request, "accPin", config.acc_pin, -1, 48);
     int trigger_pin = _get_int(request, "triggerPin", config.trigger_pin, -1, 48);
     String frame_size = _get_string(request, "frameSize", config.frame_size);
     String ap_ssid = _get_string(request, "apSsid", config.ap_ssid);
     String ap_pass = _get_string(request, "apPass", "");
 
-    if (!HAL::hal::isValidMode(mode) || !HAL::hal::isValidFrameSize(frame_size))
+    if (!HAL::hal::isValidFrameSize(frame_size))
         return _send_error(request, 400, "Valore non valido");
     if (!HAL::hal::isValidInputPin(acc_pin) || !HAL::hal::isValidInputPin(trigger_pin) || (acc_pin >= 0 && acc_pin == trigger_pin))
         return _send_error(request, 400, "ACC e sensore devono usare pin diversi (G19 / G20)");
-    if (mode == "auto" && acc_pin < 0)
-        return _send_error(request, 400, "La modalità automatica richiede l'ingresso ACC");
     if (ap_pass != "" && (ap_pass.length() < 8 || ap_pass.length() > 63))
         return _send_error(request, 400, "La password Wi-Fi deve avere da 8 a 63 caratteri");
     if (!_is_valid_ssid(ap_ssid))
         return _send_error(request, 400, "Nome rete non valido");
 
-    config.mode = mode;
     config.frame_size = frame_size;
     config.jpeg_quality = _get_int(request, "jpegQuality", config.jpeg_quality, 6, 63);
     config.fps = _get_int(request, "fps", config.fps, 1, 25);
-    config.segment_sec = _get_int(request, "segmentSec", config.segment_sec, 10, 600);
     config.min_free_mb = _get_int(request, "minFreeMb", config.min_free_mb, 100, 65536);
     // Unchecked boxes are not posted
     config.vflip = request->hasParam("vflip", true);
     config.hmirror = request->hasParam("hmirror", true);
-    config.led = request->hasParam("led", true);
 
     config.acc_pin = acc_pin;
     config.acc_active_high = request->hasParam("accActiveHigh", true);
@@ -485,10 +437,8 @@ static void _handle_set_config(AsyncWebServerRequest* request)
     else if (request->hasParam("apOpen", true))
         config.ap_password = "";
     config.ap_minutes = _get_int(request, "apMinutes", config.ap_minutes, 1, 120);
-    config.ap_always_on = request->hasParam("apAlwaysOn", true);
 
     config.temp_stop_c = _get_int(request, "tempStopC", config.temp_stop_c, 50, 100);
-    config.temp_resume_c = _get_int(request, "tempResumeC", config.temp_resume_c, 30, config.temp_stop_c - 5);
 
     if (!hal->saveConfig())
         return _send_error(request, 500, "Salvataggio non riuscito");
@@ -498,7 +448,7 @@ static void _handle_set_config(AsyncWebServerRequest* request)
                   "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
                   "<meta http-equiv=\"refresh\" content=\"15;url=/\"></head><body style=\"font-family:system-ui,sans-serif;padding:16px\">"
                   "<p>Salvato, riavvio...</p><p>Se hai cambiato nome o password del Wi-Fi ricollega il telefono alla nuova rete. "
-                  "In modalità parcheggio il Wi-Fi resta acceso solo per pochi minuti dopo l'accensione.</p></body></html>");
+                  "Il Wi-Fi si riaccende solo all'accensione o quando giri la chiave (se l'ACC è collegato).</p></body></html>");
 
     hal->requestReboot();
 }
